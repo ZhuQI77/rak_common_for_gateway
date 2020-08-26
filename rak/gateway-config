@@ -1,11 +1,20 @@
 #!/bin/bash
 
+export NCURSES_NO_UTF8_ACS=1
+
 source /usr/local/rak/shell_script/rak_common.sh
 
 GATEWAY_CONFIG_INFO=/usr/local/rak/gateway-config-info.json
 LORA_PKT_PATH=/opt/ttn-gateway/packet_forwarder/lora_pkt_fwd
 
 rpi_model=`do_get_rpi_model`
+INSTALL_CHIRPSTACK=`do_get_gw_install_chirpstack`
+GW_MODEL=`do_get_gw_model`
+GW_VERSION=`do_get_gw_version`
+GW_ID=`do_get_gw_id_from_json`
+
+INSTALL_FROM_IMG=`do_get_gateway_info install_img`
+INSTALL_LTE=`do_get_gw_install_lte`
 
 do_if_proc_is_run()
 {
@@ -39,128 +48,6 @@ do_check_ipaddr()
    done
 
    return 0
-}
-
-do_get_gateway_info()
-{
-
-    do_get_json_value $1 $GATEWAY_CONFIG_INFO
-}
-
-do_check_ip_is_localhost()
-{
-    if [ "$1" = "localhost" ] || [ "$1" = "127.0.0.1" ]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-write_json_gateway_info()
-{
-    # $1 key; $2 value
-    do_check_variable_type  $1
-    RET=$?
-    if [ $RET -eq 3 ]; then
-        sed -i "s/^.*$1.*$/\"$1\":\"$2\",/" $GATEWAY_CONFIG_INFO
-    fi
-}
-
-write_json_gateway_info_no_comma()
-{
-    # $1 key; $2 value
-    do_check_variable_type  $1
-    RET=$?
-    if [ $RET -eq 3 ]; then
-        sed -i "s/^.*$1.*$/\"$1\":\"$2\"/" $GATEWAY_CONFIG_INFO
-    fi
-}
-
-write_json_server_plan()
-{
-    write_json_gateway_info "server_plan" $1
-}
-
-write_json_server_freq()
-{
-    write_json_gateway_info_no_comma "freq" $1
-}
-
-write_json_lora_server_ip()
-{
-    # . 字母 数字
-    write_json_gateway_info "lora_server_ip" $1
-}
-
-write_json_wifi_mode()
-{
-    # 数字 1/2
-    write_json_gateway_info "wifi_mode" $1
-}
-
-write_json_ap_ssid()
-{
-    # 数字 字母 - _
-    write_json_gateway_info "ap_ssid" $1
-}
-
-write_json_ap_pwd()
-{
-    # 数字 字母 特殊字符
-    write_json_gateway_info_no_comma "ap_pwd" $1
-}
-
-write_json_lan_ip()
-{
-    # 数字 . 校验下是否为有效IP
-    write_json_gateway_info "lan_ip" $1
-}
-
-write_json_lan_gw()
-{
-    # 数字 . 校验下是否为有效IP
-    write_json_gateway_info_no_comma "lan_gw" $1
-}
-
-write_json_wlan_ip()
-{
-    # 数字 . 校验下是否为有效IP
-    write_json_gateway_info "wifi_ip" $1
-}
-
-write_json_wlan_gw()
-{
-    # 数字 . 校验下是否为有效IP
-    write_json_gateway_info_no_comma "wifi_gw" $1
-}
-
-write_json_apn_name()
-{
-    # 任意
-    write_json_gateway_info "apn_name" $1
-}
-
-write_json_apn_baud()
-{
-    # 数字
-    write_json_gateway_info_no_comma "apn_baud" $1
-}
-
-write_json_lte_mode()
-{
-    # 数字
-    write_json_gateway_info_no_comma "lte_mode" $1
-}
-
-write_json_active_lora_server()
-{
-    write_json_gateway_info "active_lora_server" $1
-}
-
-write_json_loraserver_adr()
-{
-    # 数字 1/2
-    write_json_gateway_info "loraserver_adr" $1
 }
 
 do_setup_admin_password() {
@@ -199,29 +86,37 @@ do_copy_global_conf() {
     elif [ "$1" = "chirpstack" ]; then
         write_json_server_plan 2
         do_set_lora_server_ip
-        if [ $rpi_model -eq 3 ] || [ $rpi_model -eq 4 ]; then
+        if [ "$INSTALL_CHIRPSTACK" = "1" ]; then
             do_set_LoRaServer_adr_disable
             cp /etc/chirpstack-network-server/chirpstack-network-server.$2.toml /etc/chirpstack-network-server/chirpstack-network-server.toml
-#            do_if_proc_is_run "chirpstack-network-server"
-#            RET=$?
-#            if [ $RET -eq 0 ]; then
             do_ChirpStack restart
             do_ChirpStack enable
-#            fi
         fi
     elif [ "$1" = "lorawan" ]; then
         write_json_server_plan 3
         do_set_lora_server_ip
     fi
-
     do_restart_packet_forwarder 1
 }
 
-
-
 do_setup_ttn_channel_plan() {
-    default_item=1
-    FUN=$(dialog --title "TTN Channel-plan configuration" --default-item $default_item --menu "Select the Channel-plan:" 18 60 12 \
+  default_item=1
+  if [ "${GW_MODEL}" = "RAK2287" ]; then
+    FUN=$(dialog --title "Channel-plan configuration" --default-item $default_item --menu "Channel-plan:" 18 60 12 \
+        1 "EU_863_870" \
+        2 "US_902_928" \
+        3>&1 1>&2 2>&3)
+    RET=$?
+    if [ $RET -eq 1 ]; then
+        :
+    elif [ $RET -eq 0 ]; then
+        case "$FUN" in
+            1) do_copy_global_conf "ttn" "eu_863_870" 4;;
+            2) do_copy_global_conf "ttn" "us_902_928" 8;;
+        esac
+    fi
+  else
+    FUN=$(dialog --title "Channel-plan configuration" --default-item $default_item --menu "Channel-plan:" 18 60 12 \
         1 "AS_923" \
         2 "AU_915_928" \
         3 "CN_470_510" \
@@ -246,6 +141,7 @@ do_setup_ttn_channel_plan() {
             8) do_copy_global_conf "ttn" "us_902_928" 8;;
         esac
     fi
+  fi
 }
 
 do_set_lora_server_ip()
@@ -278,30 +174,46 @@ do_set_lora_server_ip()
 
 do_setup_LoRaServer_channel_plan() {
     default_item=1
-    FUN=$(dialog --title "Server Channel-plan configuration" --default-item $default_item --menu "Server Channel-plan:" 18 60 12 \
-        1 "AS_923" \
-        2 "AU_915_928" \
-        3 "CN_470_510" \
-        4 "EU_433" \
-        5 "EU_863_870" \
-        6 "IN_865_867" \
-        7 "KR_920_923" \
-        8 "RU_864_870" \
-        9 "US_902_928" \
-        3>&1 1>&2 2>&3)
-    RET=$?
-    if [ $RET -eq 0 ]; then
-        case "$FUN" in
-            1) do_copy_global_conf "chirpstack" "as_923" 1;;
-            2) do_copy_global_conf "chirpstack" "au_915_928" 2;;
-            3) do_copy_global_conf "chirpstack" "cn_470_510" 3;;
-            4) do_copy_global_conf "chirpstack" "eu_433" 4;;
-            5) do_copy_global_conf "chirpstack" "eu_863_870" 5;;
-            6) do_copy_global_conf "chirpstack" "in_865_867" 6;;
-            7) do_copy_global_conf "chirpstack" "kr_920_923" 7;;
-            8) do_copy_global_conf "chirpstack" "ru_864_870" 8;;
-            9) do_copy_global_conf "chirpstack" "us_902_928" 9;;
-        esac
+    if [ "${GW_MODEL}" = "RAK2287" ]; then
+      FUN=$(dialog --title "Channel-plan configuration" --default-item $default_item --menu "Channel-plan:" 18 60 12 \
+          1 "EU_863_870" \
+          2 "US_902_928" \
+          3>&1 1>&2 2>&3)
+      RET=$?
+      if [ $RET -eq 1 ]; then
+          :
+      elif [ $RET -eq 0 ]; then
+          case "$FUN" in
+              1) do_copy_global_conf "chirpstack" "eu_863_870" 4;;
+              2) do_copy_global_conf "chirpstack" "us_902_928" 8;;
+          esac
+      fi
+    else
+      FUN=$(dialog --title "Channel-plan configuration" --default-item $default_item --menu "Channel-plan:" 18 60 12 \
+          1 "AS_923" \
+          2 "AU_915_928" \
+          3 "CN_470_510" \
+          4 "EU_433" \
+          5 "EU_863_870" \
+          6 "IN_865_867" \
+          7 "KR_920_923" \
+          8 "RU_864_870" \
+          9 "US_902_928" \
+          3>&1 1>&2 2>&3)
+      RET=$?
+      if [ $RET -eq 0 ]; then
+          case "$FUN" in
+              1) do_copy_global_conf "chirpstack" "as_923" 1;;
+              2) do_copy_global_conf "chirpstack" "au_915_928" 2;;
+              3) do_copy_global_conf "chirpstack" "cn_470_510" 3;;
+              4) do_copy_global_conf "chirpstack" "eu_433" 4;;
+              5) do_copy_global_conf "chirpstack" "eu_863_870" 5;;
+              6) do_copy_global_conf "chirpstack" "in_865_867" 6;;
+              7) do_copy_global_conf "chirpstack" "kr_920_923" 7;;
+              8) do_copy_global_conf "chirpstack" "ru_864_870" 8;;
+              9) do_copy_global_conf "chirpstack" "us_902_928" 9;;
+          esac
+      fi
     fi
 }
 
@@ -337,7 +249,7 @@ do_set_LoRaServer_adr()
 
 do_setup_LoRaServer_config()
 {
-    if [ $rpi_model -eq 3 ] || [ $rpi_model -eq 4 ]; then
+    if [ "$INSTALL_CHIRPSTACK" = "1" ]; then
         default_item=1
         FUN=$(dialog --title "ChirpStack Channel-plan configuration" --default-item $default_item --menu "Server Channel-plan:" 10 60 12 \
             1 "ChirpStack Channel-plan configuration" \
@@ -403,10 +315,22 @@ do_setup_channel_plan() {
 
 do_ChirpStack()
 {
-    if [ $rpi_model -eq 3 ] || [ $rpi_model -eq 4 ]; then
+    if [ "$INSTALL_CHIRPSTACK" = "1" ]; then
+      if [ "$1" = "stop" ] || [ "$1" = "disable" ] || [ "$1" = "enable" ];then
         systemctl $1 chirpstack-network-server
         systemctl $1 chirpstack-application-server
         systemctl $1 chirpstack-gateway-bridge
+      elif [ "$1" = "restart" ];then
+      	ret=`ps -ef|grep chirpstack-application-server|grep -v grep|wc -l`
+        if [ "$ret" = "0" ]; then
+          systemctl $1 chirpstack-application-server
+        fi
+        ret=`ps -ef|grep chirpstack-gateway-bridge|grep -v grep|wc -l`
+        if [ "$ret" = "0" ]; then
+          systemctl $1 chirpstack-gateway-bridge
+        fi
+        systemctl $1 chirpstack-network-server
+      fi
     fi
 }
 
@@ -418,9 +342,6 @@ do_enable_ap_mode()
         write_json_wifi_mode 1
         systemctl enable create_ap
 
-#    if [ -f "/sbin/wpa_supplicant" ]; then
-#        mv /sbin/wpa_supplicant /sbin/wpa_supplicant_bak
-#    fi
         echo "ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 " > /etc/wpa_supplicant/wpa_supplicant.conf
@@ -432,10 +353,6 @@ do_enable_wifi_mode()
 {
     write_json_wifi_mode 2
     systemctl disable create_ap
-
-#    if [ -f "/sbin/wpa_supplicant_bak" ]; then
-#        mv /sbin/wpa_supplicant_bak /sbin/wpa_supplicant
-#    fi
 
     dialog --title "Enable Wifi Mode" --msgbox "The Client mode will active after the operating system reboot." 5 70
 }
@@ -496,10 +413,7 @@ do_modify_ssid_for_ap()
 
 }
 
-#!/bin/bash
-
 INTERACTIVE=True
-
 
 get_wifi_country() {
   CODE=${1:-0}
@@ -593,7 +507,7 @@ do_wifi_ssid_passphrase() {
   do_check_if_wifi_mode
   default_item=$?
   if [ "$default_item" = "1" ]; then
-    whiptail --msgbox "Please disalbe ap mode first." 8 35
+    whiptail --msgbox "Please disable ap mode first." 8 35
     return 0
   fi
   RET=0
@@ -674,20 +588,9 @@ do_wifi_ssid_passphrase() {
     RET=$((RET + $?))
   fi
 
-  if [ $RET -eq 0 ]; then
-    wpa_cli -i "$IFACE" enable_network "$ID" > /dev/null 2>&1
-  else
-    wpa_cli -i "$IFACE" remove_network "$ID" > /dev/null 2>&1
-    if [ "$INTERACTIVE" = True ]; then
-      whiptail --msgbox "Failed to set SSID or passphrase" 20 60
-    fi
-  fi
-
   wpa_cli -i "$IFACE" save_config > /dev/null 2>&1
+  sudo sed -i '/disabled/d' /etc/wpa_supplicant/wpa_supplicant.conf
 
-#  echo "$IFACE_LIST" | while read IFACE; do
-#    wpa_cli -i "$IFACE" reconfigure > /dev/null 2>&1
-#  done
   return $RET
 }
 
@@ -716,61 +619,65 @@ do_configure_wifi() {
 }
 
 do_configure_lan() {
-    rm /tmp/eth0_ip -rf
-    mkfifo /tmp/eth0_ip
-
-    rm /tmp/eth0_gw -rf
-    mkfifo /tmp/eth0_gw
-
-    # get old ip
-    old_eth0_ip=`do_get_gateway_info lan.lan_ip`
-
-    # dialog ip
-    dialog --title "Set eth0 IP" --nocancel --inputbox "IP:" 10 40 "$old_eth0_ip" 2> /tmp/eth0_ip & 
-    RET=$?
-
-    if [ $RET -eq 1 ]; then
-        echo "error"
-    elif [ $RET -eq 0 ]; then
-        new_eth0_ip="$( cat /tmp/eth0_ip  )" 
-        do_check_ipaddr $new_eth0_ip
-        RET_IP=$?
-        rm /tmp/eth0_ip
-    fi
-
-    # get old gw
-    old_eth0_gw=`do_get_gateway_info lan.lan_gw`
-
-    # dialog eth0 gw
-    dialog --title "Set eth0 gateway IP" --nocancel --inputbox "Gateway IP:" 10 40 "$old_eth0_gw" 2> /tmp/eth0_gw & 
-    RET=$?
-
-    if [ $RET -eq 1 ]; then
-        echo "error"
-    elif [ $RET -eq 0 ]; then
-        new_eth0_gw="$( cat /tmp/eth0_gw  )" 
-        do_check_ipaddr $new_eth0_gw
-        RET_GW=$?
-        rm /tmp/eth0_gw
-    fi
-    
-    if [ $RET_IP -eq 1 ]; then
-        dialog --title "Configure LAN" --msgbox "Invalid IP address." 5 50
-    elif [ $RET_GW -eq 1 ]; then
-        dialog --title "Configure LAN" --msgbox "Invalid Gateway IP address." 5 50
+    GATEWAY_EUI_NIC="eth0"
+    if [[ `grep "$GATEWAY_EUI_NIC" /proc/net/dev` == "" ]]; then
+        dialog --title "Configure LAN" --msgbox "LAN configuration is not supported on your Raspberry Pi model." 5 66
     else
+      rm /tmp/eth0_ip -rf
+      mkfifo /tmp/eth0_ip
 
-        linenum=`sed -n '/RAK_eth0_IP/=' /etc/dhcpcd.conf`
-        let line_ip=linenum+2
-        let line_gw=linenum+3
+      rm /tmp/eth0_gw -rf
+      mkfifo /tmp/eth0_gw
 
-        sed -i "${line_ip}cstatic ip_address=${new_eth0_ip}" /etc/dhcpcd.conf
-        sed -i "${line_gw}cstatic routers=${new_eth0_gw}" /etc/dhcpcd.conf
-        write_json_lan_ip ${new_eth0_ip}
-        write_json_lan_gw ${new_eth0_gw}
-        dialog --title "Configure LAN" --msgbox "Configure LAN success.Changes will take effect after OS restart." 5 70
+      # get old ip
+      old_eth0_ip=`do_get_gateway_info lan.lan_ip`
+
+      # dialog ip
+      dialog --title "Set eth0 IP" --nocancel --inputbox "IP:" 10 40 "$old_eth0_ip" 2> /tmp/eth0_ip & 
+      RET=$?
+
+      if [ $RET -eq 1 ]; then
+          echo "error"
+      elif [ $RET -eq 0 ]; then
+          new_eth0_ip="$( cat /tmp/eth0_ip  )" 
+          do_check_ipaddr $new_eth0_ip
+          RET_IP=$?
+          rm /tmp/eth0_ip
+      fi
+
+      # get old gw
+      old_eth0_gw=`do_get_gateway_info lan.lan_gw`
+
+      # dialog eth0 gw
+      dialog --title "Set eth0 route IP" --nocancel --inputbox "Route IP:" 10 40 "$old_eth0_gw" 2> /tmp/eth0_gw & 
+      RET=$?
+
+      if [ $RET -eq 1 ]; then
+          echo "error"
+      elif [ $RET -eq 0 ]; then
+          new_eth0_gw="$( cat /tmp/eth0_gw  )" 
+          do_check_ipaddr $new_eth0_gw
+          RET_GW=$?
+          rm /tmp/eth0_gw
+      fi
+      
+      if [ $RET_IP -eq 1 ]; then
+          dialog --title "Configure LAN" --msgbox "Invalid IP address." 5 50
+      elif [ $RET_GW -eq 1 ]; then
+          dialog --title "Configure LAN" --msgbox "Invalid Route IP address." 5 50
+      else
+
+          linenum=`sed -n '/RAK_eth0_IP/=' /etc/dhcpcd.conf`
+          let line_ip=linenum+2
+          let line_gw=linenum+3
+
+          sed -i "${line_ip}cstatic ip_address=${new_eth0_ip}" /etc/dhcpcd.conf
+          sed -i "${line_gw}cstatic routers=${new_eth0_gw}" /etc/dhcpcd.conf
+          write_json_lan_ip ${new_eth0_ip}
+          write_json_lan_gw ${new_eth0_gw}
+          dialog --title "Configure LAN" --msgbox "Configure LAN success.Changes will take effect after OS restart." 5 70
+      fi
     fi
-
     do_main_menu
 }
 
@@ -787,7 +694,6 @@ do_disable_2013()
     write_json_lte_mode 2
     systemctl disable rak-pppd
     dialog --title "Disable LTE Module" --msgbox "The LTE module will not power on after the operating system starts." 5 71
-#    do_main_menu
 }
 
 do_rak2013()
@@ -849,18 +755,14 @@ do_set_apn_name()
 }
 
 do_main_menu() {
-    GW_MODEL=`do_get_gw_model`
-    GW_VERSION=`do_get_gw_version`
-    GW_ID=`do_get_gw_id`
-    
-    INSTALL_FROM_IMG=`do_get_gateway_info install_img`
+
     
     if [ "$INSTALL_FROM_IMG" = "1" ]; then
-        if [ "$GW_MODEL" = "RAK2245" ] || [ "$GW_MODEL" = "RAK831" ]; then
+        if [ "$INSTALL_LTE" = "0" ]; then
 
             FUN=$(dialog --title "$GW_MODEL (Gateway ID:$GW_ID  Version: $GW_VERSION)" --cancel-label "Quit" --menu "Configuration options:" 16 80 20 \
                 1 "Set pi password" \
-                2 "Setup RAK Gateway LoRa concentrator" \
+                2 "Setup RAK Gateway Channel Plan" \
                 3 "Restart packet-forwarder" \
                 4 "Edit packet-forwarder config" \
                 5 "Configure WIFI" \
@@ -880,12 +782,10 @@ do_main_menu() {
                     6) do_configure_lan;;
                 esac
             fi
-
-        elif [ "$GW_MODEL" = "RAK7243" ]; then
-
+        else
             FUN=$(dialog --title "$GW_MODEL (Gateway ID:$GW_ID  Version: $GW_VERSION)" --cancel-label "Quit" --menu "Configuration options:" 19 80 20 \
                 1 "Set pi password" \
-                2 "Setup RAK Gateway LoRa concentrator" \
+                2 "Setup RAK Gateway Channel Plan" \
                 3 "Restart packet-forwarder" \
                 4 "Edit packet-forwarder config" \
                 5 "Configure WIFI" \
@@ -909,40 +809,13 @@ do_main_menu() {
                     8) do_configure_lan;;
                 esac
             fi
-
-        elif [ "$GW_MODEL" = "RAK2247" ] || [ "$GW_MODEL" = "RAK833" ]; then
-            FUN=$(dialog --title "$GW_MODEL (Gateway ID:$GW_ID  Version: $GW_VERSION)" --cancel-label "Quit" --menu "Configuration options:" 16 80 20 \
-                1 "Set pi password" \
-                2 "Setup RAK Gateway LoRa concentrator" \
-                3 "Restart packet-forwarder" \
-                4 "Edit packet-forwarder config" \
-                5 "Configure WIFI" \
-                6 "Configure LAN"    \
-                3>&1 1>&2 2>&3)
-            RET=$?
-            if [ $RET -eq 1 ]; then
-                clear
-                return 0
-            elif [ $RET -eq 0 ]; then
-                case "$FUN" in
-                    1) do_setup_admin_password;;
-                    2) do_setup_channel_plan;;
-                    3) do_restart_packet_forwarder;;
-                    4) nano $LORA_PKT_PATH/global_conf.json && do_main_menu;;
-                    5) do_configure_wifi;;
-                    6) do_configure_lan;;
-                esac
-            fi
-        else
-            echo "invalid gateway model:$GW_MODEL"
-
         fi
     else
-        if [ "$GW_MODEL" = "RAK2245" ] || [ "$GW_MODEL" = "RAK831" ]; then
+        if [ "$INSTALL_LTE" = "0" ]; then
 
             FUN=$(dialog --title "$GW_MODEL (Gateway ID:$GW_ID  Version: $GW_VERSION)" --cancel-label "Quit" --menu "Configuration options:" 16 80 20 \
                 1 "Set pi password" \
-                2 "Setup RAK Gateway LoRa concentrator" \
+                2 "Setup RAK Gateway Channel Plan" \
                 3 "Restart packet-forwarder" \
                 4 "Edit packet-forwarder config" \
                 5 "Configure WIFI" \
@@ -961,11 +834,11 @@ do_main_menu() {
                 esac
             fi
 
-        elif [ "$GW_MODEL" = "RAK7243" ]; then
+        else
 
             FUN=$(dialog --title "$GW_MODEL (Gateway ID:$GW_ID  Version: $GW_VERSION)" --cancel-label "Quit" --menu "Configuration options:" 19 80 20 \
                 1 "Set pi password" \
-                2 "Setup RAK Gateway LoRa concentrator" \
+                2 "Setup RAK Gateway Channel Plan" \
                 3 "Restart packet-forwarder" \
                 4 "Edit packet-forwarder config" \
                 5 "Configure WIFI" \
@@ -987,31 +860,6 @@ do_main_menu() {
                     7) do_rak2013;;
                 esac
             fi
-
-        elif [ "$GW_MODEL" = "RAK2247" ] || [ "$GW_MODEL" = "RAK833" ]; then
-            FUN=$(dialog --title "$GW_MODEL (Gateway ID:$GW_ID  Version: $GW_VERSION)" --cancel-label "Quit" --menu "Configuration options:" 16 80 20 \
-                1 "Set pi password" \
-                2 "Setup RAK Gateway LoRa concentrator" \
-                3 "Restart packet-forwarder" \
-                4 "Edit packet-forwarder config" \
-                5 "Configure WIFI" \
-                3>&1 1>&2 2>&3)
-            RET=$?
-            if [ $RET -eq 1 ]; then
-                clear
-                return 0
-            elif [ $RET -eq 0 ]; then
-                case "$FUN" in
-                    1) do_setup_admin_password;;
-                    2) do_setup_channel_plan;;
-                    3) do_restart_packet_forwarder;;
-                    4) nano $LORA_PKT_PATH/global_conf.json && do_main_menu;;
-                    5) do_configure_wifi;;
-                esac
-            fi
-        else
-            echo "invalid gateway model:$GW_MODEL"
-
         fi
     fi
 }
@@ -1021,8 +869,4 @@ if [ $(id -u) -ne 0 ]; then
   exit 1
 fi
 
-#do_check_if_wifi_mode
-#echo $?
-#exit
 do_main_menu
-

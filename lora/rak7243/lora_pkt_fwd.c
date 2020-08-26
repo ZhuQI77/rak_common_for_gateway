@@ -2515,15 +2515,34 @@ void thread_down(void) {
             }
             if (jit_result == JIT_ERROR_OK) {
                 for (i=0; i<txlut.size; i++) {
-                    if (txlut.lut[i].rf_power == txpkt.rf_power) {
+                    if (txlut.lut[i].rf_power == txpkt.rf_power)
+                    {
                         /* this RF power is supported, we can continue */
+                        txpkt.rf_power = txlut.lut[i].rf_power;
+                        MSG("INFO: == used txlut index:%d\n", i);
+                        break;
+                    }
+                    else if (txlut.lut[i].rf_power > txpkt.rf_power) {
+                        if (0 != i)
+                        {
+                            MSG("INFO: >= used txlut index:%d. __1\n", i - 1);
+                            MSG("WARNING: network-server wants to use powe = %d, and actually uses powd = %d\n", txpkt.rf_power, txlut.lut[i - 1].rf_power);
+                            txpkt.rf_power = txlut.lut[i - 1].rf_power;
+                        }
+                        else
+                        {
+                            MSG("INFO: >= used txlut index:%d. __2\n", i);
+                            MSG("WARNING: network-server wants to use powe = %d, and actually uses powd = %d\n", txpkt.rf_power, txlut.lut[0].rf_power);
+                            txpkt.rf_power = txlut.lut[0].rf_power;
+                        }
                         break;
                     }
                 }
                 if (i == txlut.size) {
-                    /* this RF power is not supported */
-                    jit_result = JIT_ERROR_TX_POWER;
-                    MSG("ERROR: Packet REJECTED, unsupported RF power for TX - %d\n", txpkt.rf_power);
+                    /* Exceeding maximum power, use maximum power */
+                    MSG("WARNING: power for TX - %d exceeding maximum power - %d, use maximum power - %d\n", txpkt.rf_power, txlut.lut[txlut.size - 1].rf_power, txlut.lut[txlut.size - 1].rf_power);
+                    txpkt.rf_power = txlut.lut[txlut.size - 1].rf_power;
+                    MSG("INFO: >= used txlut index:%d. __3\n", txlut.size - 1);
                 }
             }
 
@@ -2654,6 +2673,52 @@ void thread_jit(void) {
     }
 }
 
+static void modify_os_time(const uint32_t ppm_tstamp)
+{
+    struct timespec y;
+    struct timespec tv;
+    static bool time_already_set = false;
+    struct timeval stamp;
+    gettimeofday(&stamp, NULL);
+    int time_diff = 0;
+    lgw_cnt2utc(time_reference_gps, ppm_tstamp, &y);
+    if ((!gps_enabled) || time_already_set)
+    {
+        return;
+    }
+    if (y.tv_sec < 1583402711) // time less than '2020-03-05 18:00:00'
+    {
+        return;
+    }
+
+    MSG("INFO: [modify_os_time] local_time=%ld, gps_time=%ld\n", stamp.tv_sec, y.tv_sec);
+    time_diff = abs(y.tv_sec - stamp.tv_sec);
+
+    if (time_diff < 10)
+    {
+        time_already_set = true;
+        MSG("INFO: [modify_os_time] The difference between the system time(%ld) and the GPS time(%ld) is less than 10 seconds. Use the system time.\n", stamp.tv_sec, y.tv_sec);
+        return;
+    }
+
+    tv.tv_sec = y.tv_sec;
+    tv.tv_nsec = 0;
+
+    int ret = clock_settime(CLOCK_REALTIME, &tv);
+    if (0 == ret)
+    {
+        time_already_set = true;
+        time_t t;
+        struct tm* local;
+        char buf[128] = {0};
+        t = time(NULL);
+        local = localtime(&t);
+        strftime(buf, 64, "%Y-%m-%d %H:%M:%S", local);  
+        MSG("INFO: [modify_os_time] System time has been synchronized via GPS, %s\n", buf);
+    }
+}
+
+
 /* -------------------------------------------------------------------------- */
 /* --- THREAD 4: PARSE GPS MESSAGE AND KEEP GATEWAY IN SYNC ----------------- */
 
@@ -2681,6 +2746,7 @@ static void gps_process_sync(void) {
     /* try to update time reference with the new GPS time & timestamp */
     pthread_mutex_lock(&mx_timeref);
     i = lgw_gps_sync(&time_reference_gps, trig_tstamp, utc, gps_time);
+    modify_os_time(trig_tstamp);
     pthread_mutex_unlock(&mx_timeref);
     if (i != LGW_GPS_SUCCESS) {
         MSG("WARNING: [gps] GPS out of sync, keeping previous time reference\n");

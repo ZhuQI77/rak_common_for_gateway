@@ -16,35 +16,55 @@ mkdir -p /usr/local/rak/lora
 
 RAK_GW_MODEL=`do_get_gw_model`
 LORA_SPI=`do_get_lora_spi`
+INSTALL_LTE=`do_get_gw_install_lte`
 
 mkdir /opt/ttn-gateway -p
 
-if [ "${RAK_GW_MODEL}" = "RAK7243" ]; then
+if [ "$INSTALL_LTE" = "1" ]; then
     pushd rak7243
     ./install.sh
     LORA_DIR_TMP=rak7243
     popd
-elif [ "${RAK_GW_MODEL}" = "RAK2245" ] || [ "${RAK_GW_MODEL}" = "RAK831" ]; then
-    pushd rak2245
-    ./install.sh
-    LORA_DIR_TMP=rak2245
-    popd
-elif [ "${RAK_GW_MODEL}" = "RAK2247" ] || [ "${RAK_GW_MODEL}" = "RAK833" ]; then
-    if [ "${LORA_SPI}" = "1" ]; then
-        pushd rak2247_spi
-        ./install.sh
-        LORA_DIR_TMP=rak2247_spi
-    else
-        pushd rak2247_usb
-        ./install.sh
-        LORA_DIR_TMP=rak2247_usb
-    fi
-    popd
 else
-    :
+    if [ "${RAK_GW_MODEL}" = "RAK2247" ] || [ "${RAK_GW_MODEL}" = "RAK833" ]; then
+        if [ "${LORA_SPI}" = "1" ]; then
+            pushd rak2247_spi
+            ./install.sh
+            LORA_DIR_TMP=rak2247_spi
+        else
+            pushd rak2247_usb
+            ./install.sh
+            LORA_DIR_TMP=rak2247_usb
+        fi
+        popd
+    elif [ "${RAK_GW_MODEL}" = "RAK2287" ]; then
+        if [ "${LORA_SPI}" = "1" ]; then
+            pushd rak2287_spi
+            ./install.sh
+            LORA_DIR_TMP=rak2287_spi
+        else
+            pushd rak2287_usb
+            ./install.sh
+            LORA_DIR_TMP=rak2287_usb
+        fi
+        popd
+    else
+        if [ "${RAK_GW_MODEL}" = "RAK2246" ]; then
+            pushd rak2246
+            ./install.sh
+            LORA_DIR_TMP=rak2246
+        else
+            pushd rak2245
+            ./install.sh
+            LORA_DIR_TMP=rak2245
+        fi
+        popd
+    fi
 fi
 
-cp $LORA_DIR_TMP/lora_gateway /opt/ttn-gateway/ -rf
+if [ -d $SCRIPT_DIR/../lora_gateway ]; then
+    cp $LORA_DIR_TMP/lora_gateway /opt/ttn-gateway/ -rf
+fi
 cp $LORA_DIR_TMP/packet_forwarder /opt/ttn-gateway/ -rf
 
 
